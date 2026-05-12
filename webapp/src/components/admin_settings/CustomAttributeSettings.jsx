@@ -100,7 +100,10 @@ const CustomAttributesSettings = (props) => {
                         token: value.token,
                         alertmanagerurl: value.alertmanagerurl,
                         user: value.user,
-                        password: value.password
+                        password: value.password,
+                        titleTemplate: value.titleTemplate,
+                        colorTemplate: value.colorTemplate,
+                        fieldsTemplate: value.fieldsTemplate
                     }}
                 />
             );

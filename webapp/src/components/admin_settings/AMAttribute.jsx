@@ -1,4 +1,5 @@
 import React, { useState, useEffect} from 'react';
+import PropTypes from 'prop-types';
 import crypto from 'crypto';
 
 const AMAttribute = (props) => {
@@ -9,6 +10,9 @@ const AMAttribute = (props) => {
         token: "",
         user: "",
         password: "",
+        titleTemplate: "",
+        colorTemplate: "",
+        fieldsTemplate: "",
     } : {
         alertmanagerurl: props.attributes.alertmanagerurl? props.attributes.alertmanagerurl: "",
         channel: props.attributes.channel? props.attributes.channel : "",
@@ -16,6 +20,9 @@ const AMAttribute = (props) => {
         token: props.attributes.token? props.attributes.token: "",
         user: props.attributes.user ? props.attributes.user: "",
         password: props.attributes.password ? props.attributes.password: "",
+        titleTemplate: props.attributes.titleTemplate ? props.attributes.titleTemplate: "",
+        colorTemplate: props.attributes.colorTemplate ? props.attributes.colorTemplate: "",
+        fieldsTemplate: props.attributes.fieldsTemplate ? props.attributes.fieldsTemplate: "",
     };
 
     const initErrors = {
@@ -213,6 +220,74 @@ const AMAttribute = (props) => {
                         true
                         )
                     }
+
+                    <div className="form-group">
+                        <label className="control-label col-sm-4">
+                            {"Custom Templates (Advanced)"}
+                        </label>
+                        <div className="col-sm-8">
+                            <details>
+                                <summary>{"Click to expand template settings"}</summary>
+                                <div style={{marginTop: '10px'}}>
+                                    { generateSimpleStringInputSetting(
+                                        "Title Template:",
+                                        "titleTemplate",
+                                        (e) => {
+                                            let newSettings = {...settings};
+                                            newSettings = {...newSettings, titleTemplate: e.target.value};
+                                            setSettings(newSettings);
+                                            props.onChange({id: props.id, attributes: newSettings});
+                                        },
+                                        (<span>{"Optional: Go template for message title. Leave empty for default."}</span>)
+                                        )
+                                    }
+
+                                    { generateSimpleStringInputSetting(
+                                        "Color Template:",
+                                        "colorTemplate",
+                                        (e) => {
+                                            let newSettings = {...settings};
+                                            newSettings = {...newSettings, colorTemplate: e.target.value};
+                                            setSettings(newSettings);
+                                            props.onChange({id: props.id, attributes: newSettings});
+                                        },
+                                        (<span>{"Optional: Go template for message color. Leave empty for default (firing=red, resolved=green)."}</span>)
+                                        )
+                                    }
+
+                                    <div className="form-group">
+                                        <label className="control-label col-sm-4">
+                                            {"Fields Template:"}
+                                        </label>
+                                        <div className="col-sm-8">
+                                            <textarea
+                                                id={`PluginSettings.Plugins.alertmanager.fieldsTemplate.${settings.id}`}
+                                                className="form-control"
+                                                rows="6"
+                                                onChange={(e) => {
+                                                    let newSettings = {...settings};
+                                                    newSettings = {...newSettings, fieldsTemplate: e.target.value};
+                                                    setSettings(newSettings);
+                                                    props.onChange({id: props.id, attributes: newSettings});
+                                                }}
+                                                value={settings.fieldsTemplate}
+                                                placeholder={'[{"title":"Summary","value":"{{.Alert.Annotations.summary}}","short":false}]'}
+                                            />
+                                            <div className="help-text">
+                                                {"Optional: JSON array of field templates. Each field has title, value (Go template), and short (boolean)."}
+                                            </div>
+                                            <div className="help-text">
+                                                <strong>{"Available template data:"}</strong>{" .Alert.Status, .Alert.Labels, .Alert.Annotations, .Alert.StartsAt, .Alert.EndsAt, .Alert.GeneratorURL, .ExternalURL, .Receiver, .Status, .ReceivedAt, .ConfigID"}
+                                            </div>
+                                            <div className="help-text">
+                                                <strong>{"Available functions:"}</strong>{" title, upper, lower, formatTime, duration, color, sortByLabel, statusEmoji, labels, annotations"}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

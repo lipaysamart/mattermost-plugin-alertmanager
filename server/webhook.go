@@ -34,6 +34,146 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request, alertConf
 		return
 	}
 
+	receivedAt := time.Now()
+
+	// Check if template is configured
+	if alertConfig.hasTemplate() {
+		p.handleWebhookWithTemplate(alertConfig, message, receivedAt)
+	} else {
+		p.handleWebhookDefault(alertConfig, message, receivedAt)
+	}
+}
+
+// hasTemplate checks if custom template is configured
+func (ac *alertConfig) hasTemplate() bool {
+	return ac.TitleTemplate != "" || ac.ColorTemplate != "" || ac.FieldsTemplate != ""
+}
+
+// handleWebhookWithTemplate processes webhook using custom template
+func (p *Plugin) handleWebhookWithTemplate(alertConfig alertConfig, message webhook.Message, receivedAt time.Time) {
+	renderer := NewTemplateRenderer()
+
+	// Parse fields template if provided
+	var tmplConfig *AlertTemplateConfig
+	if alertConfig.FieldsTemplate != "" {
+		var fieldsTmpl []FieldTemplate
+		if err := json.Unmarshal([]byte(alertConfig.FieldsTemplate), &fieldsTmpl); err != nil {
+			p.API.LogError("failed to parse fields template, using default", "err", err.Error())
+			p.handleWebhookDefault(alertConfig, message, receivedAt)
+			return
+		}
+		tmplConfig = &AlertTemplateConfig{
+			Title:          alertConfig.TitleTemplate,
+			Color:          alertConfig.ColorTemplate,
+			FieldsTemplate: fieldsTmpl,
+		}
+	} else {
+		tmplConfig = &AlertTemplateConfig{
+			Title: alertConfig.TitleTemplate,
+			Color: alertConfig.ColorTemplate,
+		}
+	}
+
+	// Render all alerts
+	var fields []*model.SlackAttachmentField
+	var lastError error
+
+	for _, alert := range message.Alerts {
+		data := &TemplateData{
+			Alert:       alert,
+			ExternalURL: message.ExternalURL,
+			Receiver:    message.Receiver,
+			Status:      message.Status,
+			ReceivedAt:  receivedAt,
+			ConfigID:    alertConfig.ID,
+		}
+
+		result, err := renderer.RenderAlert(tmplConfig, data)
+		if err != nil {
+			p.API.LogError("failed to render template, falling back to default", "err", err.Error())
+			lastError = err
+			// Fallback to default rendering for this alert
+			fields = append(fields, ConvertAlertToFields(alertConfig, alert, message.ExternalURL, message.Receiver)...)
+			continue
+		}
+
+		// Convert result to fields
+		for _, f := range result.Fields {
+			fields = append(fields, &model.SlackAttachmentField{
+				Title: f.Title,
+				Value: f.Value,
+				Short: model.SlackCompatibleBool(f.Short),
+			})
+		}
+	}
+
+	// Determine color
+	color := setColor(message.Status)
+	if alertConfig.ColorTemplate != "" {
+		// Render color template for the first alert to get color
+		if len(message.Alerts) > 0 {
+			data := &TemplateData{
+				Alert:       message.Alerts[0],
+				ExternalURL: message.ExternalURL,
+				Receiver:    message.Receiver,
+				Status:      message.Status,
+				ReceivedAt:  receivedAt,
+				ConfigID:    alertConfig.ID,
+			}
+			result, err := renderer.RenderAlert(&AlertTemplateConfig{Color: alertConfig.ColorTemplate}, data)
+			if err == nil && result.Color != "" {
+				color = result.Color
+			}
+		}
+	}
+
+	// Add error message if there were template errors
+	if lastError != nil {
+		fields = append([]*model.SlackAttachmentField{{
+			Title: "Template Error",
+			Value: fmt.Sprintf("⚠️ Template rendering failed: %s", lastError.Error()),
+			Short: false,
+		}}, fields...)
+	}
+
+	// Determine title
+	title := ""
+	if alertConfig.TitleTemplate != "" {
+		if len(message.Alerts) > 0 {
+			data := &TemplateData{
+				Alert:       message.Alerts[0],
+				ExternalURL: message.ExternalURL,
+				Receiver:    message.Receiver,
+				Status:      message.Status,
+				ReceivedAt:  receivedAt,
+				ConfigID:    alertConfig.ID,
+			}
+			result, err := renderer.RenderAlert(&AlertTemplateConfig{Title: alertConfig.TitleTemplate}, data)
+			if err == nil && result.Title != "" {
+				title = result.Title
+			}
+		}
+	}
+
+	attachment := &model.SlackAttachment{
+		Title:  title,
+		Fields: fields,
+		Color:  color,
+	}
+
+	post := &model.Post{
+		ChannelId: p.AlertConfigIDChannelID[alertConfig.ID],
+		UserId:    p.BotUserID,
+	}
+
+	model.ParseSlackAttachment(post, []*model.SlackAttachment{attachment})
+	if _, appErr := p.API.CreatePost(post); appErr != nil {
+		p.API.LogError("failed to create post", "err", appErr.Error())
+	}
+}
+
+// handleWebhookDefault processes webhook using hardcoded default format
+func (p *Plugin) handleWebhookDefault(alertConfig alertConfig, message webhook.Message, receivedAt time.Time) {
 	var fields []*model.SlackAttachmentField
 	for _, alert := range message.Alerts {
 		fields = append(fields, ConvertAlertToFields(alertConfig, alert, message.ExternalURL, message.Receiver)...)
@@ -51,7 +191,7 @@ func (p *Plugin) handleWebhook(w http.ResponseWriter, r *http.Request, alertConf
 
 	model.ParseSlackAttachment(post, []*model.SlackAttachment{attachment})
 	if _, appErr := p.API.CreatePost(post); appErr != nil {
-		return
+		p.API.LogError("failed to create post", "err", appErr.Error())
 	}
 }
 
@@ -76,6 +216,7 @@ func setColor(impact string) string {
 	return colorExpired
 }
 
+// ConvertAlertToFields converts an alert to Slack attachment fields (original hardcoded format)
 func ConvertAlertToFields(config alertConfig, alert template.Alert, externalURL, receiver string) []*model.SlackAttachmentField {
 	var fields []*model.SlackAttachmentField
 

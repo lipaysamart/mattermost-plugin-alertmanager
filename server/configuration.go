@@ -30,6 +30,10 @@ type alertConfig struct {
 	AlertManagerURL string
 	User            string
 	Password        string
+	// Template configuration (optional, uses default if not set)
+	TitleTemplate   string `json:"titleTemplate"`   // Message title template
+	ColorTemplate   string `json:"colorTemplate"`   // Color template
+	FieldsTemplate  string `json:"fieldsTemplate"` // Field templates as JSON string
 }
 
 func (ac *alertConfig) IsValid() error {
@@ -55,7 +59,9 @@ func (ac *alertConfig) IsValid() error {
 // Clone shallow copies the configuration. Your implementation may require a deep copy if
 // your configuration has reference types.
 func (c *configuration) Clone() *configuration {
-	var clone configuration
+	clone := configuration{
+		AlertConfigs: make(map[string]alertConfig, len(c.AlertConfigs)),
+	}
 	for k, v := range c.AlertConfigs {
 		clone.AlertConfigs[k] = v
 	}

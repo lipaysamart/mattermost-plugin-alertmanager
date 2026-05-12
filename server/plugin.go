@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"path/filepath"
@@ -116,6 +117,27 @@ func (p *Plugin) ServeHTTP(_ *plugin.Context, w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Admin-only endpoints (no token required)
+	if r.URL.Path == "/api/validate-template" {
+		// Check if user is admin
+		userID := r.Header.Get("Mattermost-User-ID")
+		if userID == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		user, appErr := p.API.GetUser(userID)
+		if appErr != nil {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if !user.IsSystemAdmin() {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		p.handleValidateTemplate(w, r)
+		return
+	}
+
 	invalidOrMissingTokenErr := "Invalid or missing token"
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -139,4 +161,43 @@ func (p *Plugin) ServeHTTP(_ *plugin.Context, w http.ResponseWriter, r *http.Req
 	}
 
 	http.Error(w, invalidOrMissingTokenErr, http.StatusBadRequest)
+}
+
+func (p *Plugin) handleValidateTemplate(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Title          string          `json:"title"`
+		Color          string          `json:"color"`
+		FieldsTemplate []FieldTemplate `json:"fieldsTemplate"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	renderer := NewTemplateRenderer()
+	tmplConfig := &AlertTemplateConfig{
+		Title:          req.Title,
+		Color:          req.Color,
+		FieldsTemplate: req.FieldsTemplate,
+	}
+
+	err := renderer.ValidateTemplate(tmplConfig)
+	if err != nil {
+		writeJSONError(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	writeJSONResponse(w, map[string]bool{"valid": true})
+}
+
+func writeJSONError(w http.ResponseWriter, message string, statusCode int) {
+	w.WriteHeader(statusCode)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
+func writeJSONResponse(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
 }
